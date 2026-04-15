@@ -1,0 +1,118 @@
+{
+  "name": "SB-Ship Welding Defect Classifier — 1st Model (Combo-A+)",
+  "version": "1.0",
+  "release_date": "2026-04-15",
+  "decision_reference": "KR_종합평가보고서_20260415.md — '즉시 배포 권고: Combo-A+'",
+
+  "architecture": "ResNet-50 + FC(2048→4) + Temperature Scaling",
+  "backbone": "torchvision.models.resnet50",
+  "num_classes": 4,
+  "class_names": ["303_10", "303_20", "304_10", "304_20"],
+  "class_meaning": {
+    "303_10": "undercut defect",
+    "303_20": "undercut good",
+    "304_10": "overlap defect",
+    "304_20": "overlap good"
+  },
+
+  "input": {
+    "image_format": "RGB",
+    "input_size": [224, 224],
+    "preprocessing": [
+      "PIL.Image.open(...).convert('RGB')",
+      "torchvision.transforms.Resize((224,224))",
+      "torchvision.transforms.ToTensor()   # NOTE: NO Normalize (학습 스크립트와 동일)"
+    ],
+    "dtype": "float32",
+    "pixel_range": "[0.0, 1.0]"
+  },
+
+  "temperature_scaling": {
+    "enabled": true,
+    "T": 4.940491676330566,
+    "applied_as": "softmax(logits / T, dim=1)",
+    "learned_on": "val_dev (3,126 images) via LBFGS, 97 steps",
+    "ece_before": 0.1587,
+    "ece_after": 0.02328,
+    "ece_reduction_pct": 85.33
+  },
+
+  "defect_binary_rule": "P_defect = P(303_10) + P(304_10); P_good = 1 - P_defect",
+
+  "recommended_thresholds": {
+    "default": {
+      "threshold": 0.5,
+      "precision": 0.9253,
+      "recall": 0.9141,
+      "f1": 0.9197,
+      "pr_auc": 0.9663,
+      "roc_auc": 0.9802
+    },
+    "youden_J_balanced": {
+      "threshold": 0.3937,
+      "recall": 0.9400,
+      "precision": 0.9020,
+      "note": "Best balance (J=0.873) from val_holdout after T-scaling"
+    },
+    "recall_95": {
+      "threshold": 0.0258,
+      "approx_recall": 0.95,
+      "approx_precision": 0.872,
+      "note": "For safety-critical screening; expect ~240 FP"
+    },
+    "recall_99": {
+      "threshold": 0.0,
+      "approx_recall": 0.99,
+      "approx_precision": 0.69,
+      "note": "Not recommended — FP explodes"
+    }
+  },
+
+  "review_queue": {
+    "policy": "route to human review when 0.45 < P_defect < 0.60 (after T-scaling)",
+    "queue_fraction": 0.1369,
+    "frac_of_errors_captured": 0.3382,
+    "note": "After T-scaling, review queue becomes actionable (was only 7.4% captured before calibration)"
+  },
+
+  "metrics_on_val_holdout_3126": {
+    "4class_accuracy": 0.8013,
+    "defect_binary_f1_at_0_5": 0.9197,
+    "errors_total": 621,
+    "undercut_vs_overlap_confusion_rate": 0.6683,
+    "quality_confusion_rate": 0.1948
+  },
+
+  "training": {
+    "script": "parts_resnet/_02_train_Resnet_ship.py",
+    "optimizer": "Adam",
+    "lr": 1e-4,
+    "batch_size": 20,
+    "epochs": 50,
+    "best_epoch": 49,
+    "best_val_acc": 0.8013,
+    "weights_file": "weights/Best_ship_model.pth"
+  },
+
+  "benchmark_rtx_a6000": {
+    "bs_1":   {"latency_ms": 6.38,  "throughput_img_per_s": 156.67,  "gpu_mem_mib": 393},
+    "bs_8":   {"latency_ms": 6.66,  "throughput_img_per_s": 1201.84, "gpu_mem_mib": 275},
+    "bs_32":  {"latency_ms": 21.47, "throughput_img_per_s": 1490.57, "gpu_mem_mib": 445},
+    "bs_128": {"latency_ms": 78.96, "throughput_img_per_s": 1620.98, "gpu_mem_mib": 1437},
+    "bs_256": {"latency_ms": 159.86,"throughput_img_per_s": 1601.38, "gpu_mem_mib": 2785}
+  },
+
+  "files": {
+    "pytorch_weights": "weights/Best_ship_model.pth",
+    "onnx_weights":    "weights/resnet50_ts.onnx",
+    "calibration":     "calibration_results.json",
+    "inference_script":"infer.py",
+    "readme":          "README.md"
+  },
+
+  "known_limitations": [
+    "4-class accuracy stuck at 80.13% — 66.8% of errors are undercut↔overlap type confusion",
+    "Cascade attempts (Swin/EffDet) DEGRADED accuracy and are not recommended for production — see KR_종합평가보고서",
+    "Without Normalize in preprocessing, keep inputs in [0,1] via ToTensor; applying ImageNet mean/std will break predictions"
+  ]
+}
